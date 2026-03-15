@@ -1,11 +1,11 @@
 {
-  "name": "gemini-flash-api",
+  "name": "talismanic-ai-chat",
   "version": "1.0.0",
-  "description": "",
+  "description": "Talismanic AI - Smart chatbot with Gemini AI, file upload, and conversation history",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "npx nodemon -x 'node index.js' -e js"
+    "start": "node index.js",
+    "dev": "npx nodemon -x 'node index.js' -e js,html,css"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +13,7 @@
   "type": "module",
   "dependencies": {
     "@google/genai": "^1.44.0",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
