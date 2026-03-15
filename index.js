@@ -23,6 +23,25 @@ app.use(express.static('public'));
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
+// Tools Definition (Gemini Function Calling)
+// ==========================================
+const aiTools = [{
+  functionDeclarations: [{
+    name: 'create_booking',
+    description: 'Create a new service booking appointment in the database. Call this ONLY when the user has provided their name, service type, and confirmed a booking date.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        customerName: { type: 'STRING', description: 'Real name of the customer.' },
+        serviceType: { type: 'STRING', description: 'Type of service (e.g., tune up, ganti oli).' },
+        bookingDate: { type: 'STRING', description: 'Booking date in YYYY-MM-DD HH:MM:00 format.' }
+      },
+      required: ['customerName', 'serviceType', 'bookingDate']
+    }
+  }]
+}];
+
+// ==========================================
 // Helper
 // ==========================================
 function getSetting(key) {
@@ -126,17 +145,62 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
       console.error('RAG error (non-fatal):', ragError.message);
     }
 
-    // Call Gemini
-    const aiResponse = await ai.models.generateContent({
+    // Call Gemini Initial
+    const genConfig = {
+      temperature,
+      systemInstruction: augmentedSystemPrompt,
+      tools: aiTools
+    };
+
+    let aiResponse = await ai.models.generateContent({
       model,
       contents,
-      config: {
-        temperature,
-        systemInstruction: augmentedSystemPrompt
-      }
+      config: genConfig
     });
 
-    const aiText = aiResponse.text;
+    // Function Calling execution loop
+    if (aiResponse.functionCalls && aiResponse.functionCalls.length > 0) {
+      const call = aiResponse.functionCalls[0];
+      
+      if (call.name === 'create_booking') {
+        const { customerName, serviceType, bookingDate } = call.args;
+        console.log(`🤖 AI executing function: create_booking for ${customerName}`);
+        
+        try {
+          // Insert to MySQL
+          const [result] = await mysqlPool.query(
+            'INSERT INTO bookings (customer_name, service_type, booking_date, status) VALUES (?, ?, ?, ?)',
+            [customerName, serviceType, bookingDate, 'confirmed']
+          );
+          
+          const bookingRef = `BKG-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2, '0')}-${result.insertId}`;
+          
+          // Append model's tool call request
+          contents.push({ role: 'model', parts: [{ functionCall: call }] });
+          
+          // Execute function response back to the model
+          contents.push({
+            role: 'user',
+            parts: [{
+              functionResponse: {
+                name: 'create_booking',
+                response: { status: 'success', bookingReference: bookingRef, notes: 'Data saved to MySQL dashboard.' }
+              }
+            }]
+          });
+
+          // Second Gemini call to interpret the tool result
+          aiResponse = await ai.models.generateContent({ model, contents, config: genConfig });
+        } catch (dbErr) {
+          console.error("Auto-booking failed:", dbErr);
+          contents.push({ role: 'model', parts: [{ functionCall: call }] });
+          contents.push({ role: 'user', parts: [{ functionResponse: { name: 'create_booking', response: { status: 'error', error: dbErr.message } } }] });
+          aiResponse = await ai.models.generateContent({ model, contents, config: genConfig });
+        }
+      }
+    }
+
+    const aiText = aiResponse.text || '(AI merespons dengan struktur khusus)';
 
     // Save AI response to DB
     db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')

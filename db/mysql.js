@@ -4,7 +4,7 @@ import 'dotenv/config';
 // Create a connection pool for MySQL
 // These environment variables need to be set in your .env file
 const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
+  socketPath: process.env.MYSQL_SOCKET || '/tmp/mysql.sock',
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
   database: process.env.MYSQL_DATABASE || 'talismanic_db',
