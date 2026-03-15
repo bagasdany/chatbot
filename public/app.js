@@ -774,14 +774,14 @@ function pollDocStatus(docId) {
 async function renderDashboard() {
   try {
     const stats = await api.getDashboardStats();
-    
+
     // Check if MySQL connection failed (stats returns error message)
     if (stats.error) {
       $('dashboard-error').classList.remove('hidden');
       $('dashboard-error').innerHTML = `⚠️ <b>MySQL Error:</b> ${escapeHtml(stats.error)}`;
       return;
     }
-    
+
     if (stats.activeBookings === '-') {
       $('dashboard-error').classList.remove('hidden');
     } else {
@@ -805,6 +805,7 @@ async function renderDashboard() {
           <td>${escapeHtml(b.service_type)}</td>
           <td>${formatDate(b.booking_date)}</td>
           <td><span class="status-badge ${b.status}">${b.status}</span></td>
+          <td>${escapeHtml(b.booking_code)}</td>
         </tr>
       `).join('');
     }

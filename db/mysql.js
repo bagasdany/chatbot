@@ -24,6 +24,7 @@ export async function initMySQL() {
     await connection.query(`
       CREATE TABLE IF NOT EXISTS bookings (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        booking_code VARCHAR(20) UNIQUE,
         customer_name VARCHAR(255) NOT NULL,
         service_type VARCHAR(255) NOT NULL,
         booking_date DATETIME NOT NULL,

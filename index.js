@@ -167,13 +167,18 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
         console.log(`🤖 AI executing function: create_booking for ${customerName}`);
         
         try {
-          // Insert to MySQL
+          // Semi-random ID for immediate use
+          const tempRef = `BKG-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2, '0')}-${Math.floor(Math.random() * 999)}`;
+          
+          // Insert to MySQL with booking_code
           const [result] = await mysqlPool.query(
-            'INSERT INTO bookings (customer_name, service_type, booking_date, status) VALUES (?, ?, ?, ?)',
-            [customerName, serviceType, bookingDate, 'confirmed']
+            'INSERT INTO bookings (booking_code, customer_name, service_type, booking_date, status) VALUES (?, ?, ?, ?, ?)',
+            [tempRef, customerName, serviceType, bookingDate, 'confirmed']
           );
           
+          // Final reference (optional: update with real ID)
           const bookingRef = `BKG-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2, '0')}-${result.insertId}`;
+          await mysqlPool.query('UPDATE bookings SET booking_code = ? WHERE id = ?', [bookingRef, result.insertId]);
           
           // Append model's tool call request
           contents.push({ role: 'model', parts: [{ functionCall: call }] });
@@ -402,8 +407,8 @@ app.get('/api/dashboard/stats', async (req, res) => {
 
 app.get('/api/dashboard/bookings', async (req, res) => {
   try {
-    const [bookings] = await mysqlPool.query('SELECT * FROM bookings ORDER BY created_at DESC LIMIT 50');
-    res.json(bookings);
+    const [rows] = await mysqlPool.query('SELECT * FROM bookings ORDER BY created_at DESC LIMIT 5');
+    res.json(rows);
   } catch (error) {
     res.json([]);
   }
