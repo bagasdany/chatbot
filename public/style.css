@@ -1180,6 +1180,48 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .kb-btn-delete:hover { background: var(--danger-dim); color: var(--danger); }
 
+/* ========== DASHBOARD (MySQL) ========== */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.dashboard-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+.dashboard-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: var(--danger);
+  padding: 14px 20px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+.dashboard-error.hidden {
+  display: none;
+}
+.text-center {
+  text-align: center !important;
+  color: var(--text-muted);
+}
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.status-badge.pending { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.status-badge.confirmed, .status-badge.paid { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+.status-badge.completed, .status-badge.shipped { background: var(--accent-dim); color: var(--accent); }
+.status-badge.cancelled { background: var(--danger-dim); color: var(--danger); }
+.status-badge.unpaid { background: var(--border); color: var(--text-secondary); }
+
 /* ========== RESPONSIVE ========== */
 @media (max-width: 768px) {
   .sidebar {

@@ -9,7 +9,7 @@ function getAI() {
   return ai;
 }
 
-const EMBEDDING_MODEL = 'text-embedding-004';
+const EMBEDDING_MODEL = 'gemini-embedding-001';
 
 /**
  * Generate embedding vector for a single text
@@ -20,9 +20,9 @@ export async function embedText(text) {
   const genai = getAI();
   const response = await genai.models.embedContent({
     model: EMBEDDING_MODEL,
-    content: text,
+    contents: text,
   });
-  return response.embedding.values;
+  return response.embeddings[0].values;
 }
 
 /**

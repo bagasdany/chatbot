@@ -7,6 +7,10 @@ import db from './db/database.js';
 import { chunkText, extractText } from './rag/chunker.js';
 import { embedBatch } from './rag/embedder.js';
 import { retrieveContext } from './rag/retriever.js';
+import mysqlPool, { initMySQL } from './db/mysql.js';
+
+// Init MySQL schema
+initMySQL();
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -311,6 +315,44 @@ async function processDocument(docId, file) {
     db.prepare("UPDATE knowledge_documents SET status = 'error' WHERE id = ?").run(docId);
   }
 }
+
+// ==========================================
+// API: MySQL Dashboard
+// ==========================================
+app.get('/api/dashboard/stats', async (req, res) => {
+  try {
+    const [bookingCount] = await mysqlPool.query("SELECT COUNT(*) as count FROM bookings WHERE status != 'cancelled'");
+    const [orderTotal] = await mysqlPool.query("SELECT SUM(amount) as total FROM orders WHERE status = 'paid'");
+    const [recentBookings] = await mysqlPool.query("SELECT COUNT(*) as count FROM bookings WHERE created_at >= NOW() - INTERVAL 7 DAY");
+    
+    res.json({
+      activeBookings: bookingCount[0].count,
+      totalRevenue: orderTotal[0].total || 0,
+      newBookingsWeek: recentBookings[0].count
+    });
+  } catch (error) {
+    if (error.code === 'ECONNREFUSED') return res.json({ activeBookings: '-', totalRevenue: '-', newBookingsWeek: '-' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard/bookings', async (req, res) => {
+  try {
+    const [bookings] = await mysqlPool.query('SELECT * FROM bookings ORDER BY created_at DESC LIMIT 50');
+    res.json(bookings);
+  } catch (error) {
+    res.json([]);
+  }
+});
+
+app.get('/api/dashboard/orders', async (req, res) => {
+  try {
+    const [orders] = await mysqlPool.query('SELECT * FROM orders ORDER BY created_at DESC LIMIT 50');
+    res.json(orders);
+  } catch (error) {
+    res.json([]);
+  }
+});
 
 // ==========================================
 // Start server

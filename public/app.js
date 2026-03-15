@@ -103,6 +103,19 @@ const api = {
   async getKnowledgeDocStatus(id) {
     const res = await fetch(`/api/knowledge/${id}/status`);
     return res.json();
+  },
+  // Dashboard
+  async getDashboardStats() {
+    const res = await fetch('/api/dashboard/stats');
+    return res.json();
+  },
+  async getDashboardBookings() {
+    const res = await fetch('/api/dashboard/bookings');
+    return res.json();
+  },
+  async getDashboardOrders() {
+    const res = await fetch('/api/dashboard/orders');
+    return res.json();
   }
 };
 
@@ -418,6 +431,7 @@ function showView(view) {
   if (view === 'db') renderDbViewer();
   if (view === 'settings') loadSettings();
   if (view === 'knowledge') renderKnowledgeBase();
+  if (view === 'dashboard') renderDashboard();
 }
 
 // ==========================================
@@ -753,3 +767,67 @@ function pollDocStatus(docId) {
     }
   }, 3000); // Check every 3 seconds
 }
+
+// ==========================================
+// Dashboard (MySQL) Functions
+// ==========================================
+async function renderDashboard() {
+  try {
+    const stats = await api.getDashboardStats();
+    
+    // Check if MySQL connection failed (stats returns error message)
+    if (stats.error) {
+      $('dashboard-error').classList.remove('hidden');
+      $('dashboard-error').innerHTML = `⚠️ <b>MySQL Error:</b> ${escapeHtml(stats.error)}`;
+      return;
+    }
+    
+    if (stats.activeBookings === '-') {
+      $('dashboard-error').classList.remove('hidden');
+    } else {
+      $('dashboard-error').classList.add('hidden');
+    }
+
+    // Render Stats
+    $('stat-active-bookings').textContent = stats.activeBookings;
+    $('stat-total-revenue').textContent = stats.totalRevenue !== '-' ? `Rp ${Number(stats.totalRevenue).toLocaleString('id-ID')}` : '-';
+    $('stat-new-bookings').textContent = stats.newBookingsWeek;
+
+    // Render Bookings
+    const bookings = await api.getDashboardBookings();
+    const bBody = $('dashboard-bookings-body');
+    if (bookings.length === 0) {
+      bBody.innerHTML = `<tr><td colspan="4" class="text-center">No recent bookings</td></tr>`;
+    } else {
+      bBody.innerHTML = bookings.map(b => `
+        <tr>
+          <td>${escapeHtml(b.customer_name)}</td>
+          <td>${escapeHtml(b.service_type)}</td>
+          <td>${formatDate(b.booking_date)}</td>
+          <td><span class="status-badge ${b.status}">${b.status}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    // Render Orders
+    const orders = await api.getDashboardOrders();
+    const oBody = $('dashboard-orders-body');
+    if (orders.length === 0) {
+      oBody.innerHTML = `<tr><td colspan="4" class="text-center">No recent orders</td></tr>`;
+    } else {
+      oBody.innerHTML = orders.map(o => `
+        <tr>
+          <td>${escapeHtml(o.customer_name)}</td>
+          <td>${escapeHtml(o.product_name)}</td>
+          <td>Rp ${Number(o.amount).toLocaleString('id-ID')}</td>
+          <td><span class="status-badge ${o.status}">${o.status}</span></td>
+        </tr>
+      `).join('');
+    }
+  } catch (error) {
+    console.error('Failed to load dashboard:', error);
+    $('dashboard-error').classList.remove('hidden');
+    $('dashboard-error').textContent = 'Gagal memuat data Dashboard. Pastikan MySQL berjalan.';
+  }
+}
+
