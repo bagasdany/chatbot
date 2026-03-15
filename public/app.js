@@ -80,6 +80,29 @@ const api = {
   async getDbMessages(page = 1) {
     const res = await fetch(`/api/db/messages?page=${page}&limit=30`);
     return res.json();
+  },
+  // Knowledge Base
+  async getKnowledgeDocs() {
+    const res = await fetch('/api/knowledge');
+    return res.json();
+  },
+  async uploadKnowledgeDoc(file) {
+    const formData = new FormData();
+    formData.append('document', file);
+    const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json();
+  },
+  async deleteKnowledgeDoc(id) {
+    const res = await fetch(`/api/knowledge/${id}`, { method: 'DELETE' });
+    return res.json();
+  },
+  async getKnowledgeDocStatus(id) {
+    const res = await fetch(`/api/knowledge/${id}/status`);
+    return res.json();
   }
 };
 
@@ -394,6 +417,7 @@ function showView(view) {
 
   if (view === 'db') renderDbViewer();
   if (view === 'settings') loadSettings();
+  if (view === 'knowledge') renderKnowledgeBase();
 }
 
 // ==========================================
@@ -588,6 +612,31 @@ function initEventListeners() {
       }
     }
   });
+
+  // Knowledge Base: file input
+  $('kb-file-input').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      await uploadKnowledgeDoc(file);
+    }
+    e.target.value = '';
+  });
+
+  // Knowledge Base: drag & drop
+  const kbArea = $('kb-upload-area');
+  kbArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    kbArea.classList.add('drag-over');
+  });
+  kbArea.addEventListener('dragleave', () => kbArea.classList.remove('drag-over'));
+  kbArea.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    kbArea.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files);
+    for (const file of files) {
+      await uploadKnowledgeDoc(file);
+    }
+  });
 }
 
 // ==========================================
@@ -603,3 +652,104 @@ async function init() {
 }
 
 init();
+
+// ==========================================
+// Knowledge Base Functions
+// ==========================================
+let kbPollingTimers = {};
+
+async function renderKnowledgeBase() {
+  const docs = await api.getKnowledgeDocs();
+  const container = $('kb-documents');
+
+  if (docs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📚</div>
+        <p>Belum ada dokumen di knowledge base</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = docs.map(doc => {
+    const iconClass = doc.status;
+    const icon = doc.status === 'ready' ? '✅' : doc.status === 'processing' ? '⏳' : doc.status === 'error' ? '❌' : '⚠️';
+    const statusHtml = doc.status === 'processing'
+      ? `<span class="kb-status processing"><span class="kb-spinner"></span> Processing</span>`
+      : `<span class="kb-status ${doc.status}">${doc.status}</span>`;
+
+    return `
+      <div class="kb-doc-card" data-doc-id="${doc.id}">
+        <div class="kb-doc-icon ${iconClass}">${icon}</div>
+        <div class="kb-doc-info">
+          <div class="kb-doc-name">${escapeHtml(doc.filename)}</div>
+          <div class="kb-doc-meta">
+            ${statusHtml}
+            ${doc.chunk_count ? `<span>${doc.chunk_count} chunks</span>` : ''}
+            <span>${formatFileSize(doc.file_size || 0)}</span>
+            <span>${formatDate(doc.created_at)}</span>
+          </div>
+        </div>
+        <button class="kb-btn-delete" onclick="deleteKnowledgeDoc(${doc.id})" title="Delete document">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>`;
+  }).join('');
+
+  // Start polling for any processing documents
+  docs.filter(d => d.status === 'processing').forEach(doc => {
+    pollDocStatus(doc.id);
+  });
+}
+
+async function uploadKnowledgeDoc(file) {
+  try {
+    toast(`Uploading: ${file.name}...`, 'info');
+    const result = await api.uploadKnowledgeDoc(file);
+    toast(`${file.name} sedang diproses...`, 'info');
+    await renderKnowledgeBase();
+    // Start polling for this document
+    pollDocStatus(result.id);
+  } catch (error) {
+    toast(`Gagal upload: ${error.message}`, 'error');
+  }
+}
+
+async function deleteKnowledgeDoc(id) {
+  if (!confirm('Hapus dokumen ini dari knowledge base?')) return;
+  // Stop polling if active
+  if (kbPollingTimers[id]) {
+    clearInterval(kbPollingTimers[id]);
+    delete kbPollingTimers[id];
+  }
+  await api.deleteKnowledgeDoc(id);
+  toast('Dokumen dihapus', 'success');
+  await renderKnowledgeBase();
+}
+
+function pollDocStatus(docId) {
+  // Avoid duplicate polling
+  if (kbPollingTimers[docId]) return;
+
+  kbPollingTimers[docId] = setInterval(async () => {
+    try {
+      const doc = await api.getKnowledgeDocStatus(docId);
+      if (doc.status !== 'processing') {
+        clearInterval(kbPollingTimers[docId]);
+        delete kbPollingTimers[docId];
+        if (doc.status === 'ready') {
+          toast(`✅ ${doc.filename} siap digunakan! (${doc.chunk_count} chunks)`, 'success');
+        } else if (doc.status === 'error') {
+          toast(`❌ Gagal memproses ${doc.filename}`, 'error');
+        }
+        // Re-render to update status
+        if (state.currentView === 'knowledge') {
+          renderKnowledgeBase();
+        }
+      }
+    } catch (err) {
+      clearInterval(kbPollingTimers[docId]);
+      delete kbPollingTimers[docId];
+    }
+  }, 3000); // Check every 3 seconds
+}

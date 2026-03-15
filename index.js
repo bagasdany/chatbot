@@ -4,6 +4,9 @@ import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
 import cors from 'cors';
 import db from './db/database.js';
+import { chunkText, extractText } from './rag/chunker.js';
+import { embedBatch } from './rag/embedder.js';
+import { retrieveContext } from './rag/retriever.js';
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -105,13 +108,27 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     if (currentParts.length === 0) currentParts.push({ text: '(file uploaded)' });
     contents.push({ role: 'user', parts: currentParts });
 
+    // RAG: Search knowledge base for relevant context
+    let augmentedSystemPrompt = systemPrompt || '';
+    try {
+      const ragResults = await retrieveContext(message || '');
+      if (ragResults.length > 0) {
+        const contextText = ragResults.map(r =>
+          `[Sumber: ${r.filename} | Relevansi: ${(r.score * 100).toFixed(0)}%]\n${r.content}`
+        ).join('\n\n---\n\n');
+        augmentedSystemPrompt += `\n\nBerikut adalah informasi dari knowledge base yang relevan. Gunakan informasi ini untuk menjawab pertanyaan user jika relevan:\n\n${contextText}`;
+      }
+    } catch (ragError) {
+      console.error('RAG error (non-fatal):', ragError.message);
+    }
+
     // Call Gemini
     const aiResponse = await ai.models.generateContent({
       model,
       contents,
       config: {
         temperature,
-        systemInstruction: systemPrompt
+        systemInstruction: augmentedSystemPrompt
       }
     });
 
@@ -197,6 +214,103 @@ app.get('/api/db/messages', (req, res) => {
   const total = db.prepare('SELECT COUNT(*) as count FROM messages').get();
   res.json({ messages, total: total.count, page, limit });
 });
+
+// ==========================================
+// API: Knowledge Base
+// ==========================================
+app.get('/api/knowledge', (req, res) => {
+  const documents = db.prepare('SELECT * FROM knowledge_documents ORDER BY created_at DESC').all();
+  res.json(documents);
+});
+
+app.post('/api/knowledge/upload', upload.single('document'), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+  // Insert document record with 'processing' status
+  const result = db.prepare(
+    'INSERT INTO knowledge_documents (filename, file_type, file_size, status) VALUES (?, ?, ?, ?)'
+  ).run(file.originalname, file.mimetype, file.size, 'processing');
+
+  const docId = result.lastInsertRowid;
+
+  // Return immediately, process in background
+  res.json({ id: Number(docId), status: 'processing', filename: file.originalname });
+
+  // Background processing: extract → chunk → embed → store
+  processDocument(docId, file).catch(err => {
+    console.error('Document processing error:', err);
+    db.prepare("UPDATE knowledge_documents SET status = 'error' WHERE id = ?").run(docId);
+  });
+});
+
+app.delete('/api/knowledge/:id', (req, res) => {
+  db.prepare('DELETE FROM knowledge_chunks WHERE document_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM knowledge_documents WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/api/knowledge/:id/status', (req, res) => {
+  const doc = db.prepare('SELECT * FROM knowledge_documents WHERE id = ?').get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  res.json(doc);
+});
+
+/**
+ * Background document processing pipeline
+ * 1. Extract text (Gemini for PDFs, direct read for text files)
+ * 2. Chunk text into overlapping segments
+ * 3. Generate embeddings via Gemini text-embedding-004
+ * 4. Store chunks + embeddings in SQLite
+ */
+async function processDocument(docId, file) {
+  try {
+    console.log(`📄 Processing: ${file.originalname}`);
+
+    // Step 1: Extract text
+    const text = await extractText(file.buffer, file.mimetype, ai);
+    if (!text || text.trim().length === 0) {
+      db.prepare("UPDATE knowledge_documents SET status = 'empty', chunk_count = 0 WHERE id = ?").run(docId);
+      console.log(`⚠️  Empty document: ${file.originalname}`);
+      return;
+    }
+
+    // Step 2: Chunk text
+    const chunks = chunkText(text);
+    console.log(`📦 ${chunks.length} chunks created`);
+
+    if (chunks.length === 0) {
+      db.prepare("UPDATE knowledge_documents SET status = 'empty', chunk_count = 0 WHERE id = ?").run(docId);
+      return;
+    }
+
+    // Step 3: Generate embeddings
+    console.log(`🔢 Generating embeddings...`);
+    const embeddings = await embedBatch(chunks);
+
+    // Step 4: Store chunks with embeddings
+    const insertChunk = db.prepare(
+      'INSERT INTO knowledge_chunks (document_id, content, embedding, chunk_index) VALUES (?, ?, ?, ?)'
+    );
+    const insertAll = db.transaction((items) => {
+      for (const item of items) {
+        insertChunk.run(item.docId, item.content, JSON.stringify(item.embedding), item.index);
+      }
+    });
+
+    insertAll(chunks.map((content, index) => ({
+      docId, content, embedding: embeddings[index], index
+    })));
+
+    // Step 5: Mark as ready
+    db.prepare("UPDATE knowledge_documents SET status = 'ready', chunk_count = ? WHERE id = ?").run(chunks.length, docId);
+    console.log(`✅ Ready: ${file.originalname} (${chunks.length} chunks)`);
+
+  } catch (error) {
+    console.error(`❌ Processing failed: ${file.originalname}`, error.message);
+    db.prepare("UPDATE knowledge_documents SET status = 'error' WHERE id = ?").run(docId);
+  }
+}
 
 // ==========================================
 // Start server

@@ -37,6 +37,26 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS knowledge_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    file_type TEXT,
+    file_size INTEGER,
+    chunk_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'processing',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    embedding TEXT,
+    chunk_index INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (document_id) REFERENCES knowledge_documents(id) ON DELETE CASCADE
+  );
 `);
 
 // ==========================================
